@@ -665,10 +665,10 @@ const App = () => {
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-3">
               <BookOpen size={32} className="text-blue-900" />
-              <h1 className="text-2xl font-bold text-gray-900">School Management System</h1>
+              <h1 className="text-2xl font-bold text-gray-900">School Management System DEMO ( ENSAK )</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">Academic Year 2024-2025</span>
+              <span className="text-sm text-gray-600">Academic Year 2024/2025</span>
               <button className="bg-blue-900 text-white px-4 py-2 text-sm font-medium hover:bg-blue-800 transition-colors duration-200">
                 Settings
               </button>
