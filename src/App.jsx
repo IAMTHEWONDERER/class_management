@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Settings, BookOpen, Plus, Edit2, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Calendar, Users, Settings, BookOpen, Plus, Edit2, Trash2, Eye, EyeOff, AlertTriangle, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 
 // Data structure and initial data
 const initialData = {
@@ -16,6 +16,11 @@ const initialData = {
     tdClasses: ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5'],
     tpClasses: ['Lab 1', 'Lab 2', 'Lab 3']
   },
+  capacities: {
+    amphitheaters: 400,
+    tdClasses: 35,  // Updated capacity
+    tpClasses: 25
+  },
   timeSlots: ['08:30 - 10:00', '10:15 - 11:45', '14:00 - 15:30', '15:45 - 17:15'],
   days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
   groupColors: {
@@ -24,6 +29,57 @@ const initialData = {
     C: { bg: 'bg-green-100', border: 'border-green-500', text: 'text-green-800', accent: 'bg-green-500' },
     D: { bg: 'bg-yellow-100', border: 'border-yellow-500', text: 'text-yellow-800', accent: 'bg-yellow-500' }
   }
+};
+
+// Utility functions
+const getWeekDates = (currentWeek) => {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() + (currentWeek * 7));
+  const monday = new Date(startDate);
+  monday.setDate(startDate.getDate() - startDate.getDay() + 1);
+  
+  const weekDates = {};
+  initialData.days.forEach((day, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    weekDates[day] = date;
+  });
+  
+  return weekDates;
+};
+
+const formatDate = (date) => {
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric' 
+  });
+};
+
+// Holiday API function
+const fetchMoroccanHolidays = async (year) => {
+  try {
+    // Using a public holidays API for Morocco
+    const response = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/MA`);
+    if (response.ok) {
+      const holidays = await response.json();
+      return holidays.map(holiday => new Date(holiday.date));
+    }
+  } catch (error) {
+    console.warn('Could not fetch Moroccan holidays:', error);
+  }
+  
+  // Fallback with some known Moroccan holidays
+  return [
+    new Date(year, 0, 1),   // New Year
+    new Date(year, 0, 11),  // Independence Manifesto Day
+    new Date(year, 4, 1),   // Labour Day
+    new Date(year, 6, 30),  // Throne Day
+    new Date(year, 7, 14),  // Oued Ed-Dahab Day
+    new Date(year, 7, 20),  // Revolution Day
+    new Date(year, 7, 21),  // Youth Day
+    new Date(year, 10, 6),  // Green March Day
+    new Date(year, 10, 18), // Independence Day
+  ];
 };
 
 // Storage utilities with real localStorage
@@ -38,7 +94,6 @@ const StorageManager = {
     };
     try {
       localStorage.setItem(StorageManager.STORAGE_KEY, JSON.stringify(data));
-      console.log('Schedule saved successfully');
     } catch (error) {
       console.error('Error saving schedule:', error);
     }
@@ -55,7 +110,6 @@ const StorageManager = {
       console.error('Error loading schedule:', error);
     }
     
-    // Return empty schedule if nothing stored
     return {
       amphitheater: [],
       td: [],
@@ -66,7 +120,6 @@ const StorageManager = {
   clearSchedule: () => {
     try {
       localStorage.removeItem(StorageManager.STORAGE_KEY);
-      console.log('Schedule cleared successfully');
     } catch (error) {
       console.error('Error clearing schedule:', error);
     }
@@ -85,6 +138,43 @@ const StorageManager = {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
+  }
+};
+
+// Conflict detection utility
+const ConflictChecker = {
+  checkRoomConflict: (schedule, newClass, classType) => {
+    const allClasses = [
+      ...schedule.amphitheater,
+      ...schedule.td,
+      ...schedule.tp
+    ];
+    
+    return allClasses.find(existing => 
+      existing.room === newClass.room &&
+      existing.day === newClass.day &&
+      existing.time === newClass.time &&
+      existing.id !== newClass.id
+    );
+  },
+  
+  checkGroupConflict: (schedule, newClass) => {
+    const allClasses = [
+      ...schedule.amphitheater,
+      ...schedule.td,
+      ...schedule.tp
+    ];
+    
+    const newGroup = newClass.group || newClass.subGroup?.charAt(0);
+    
+    return allClasses.find(existing => {
+      const existingGroup = existing.group || existing.subGroup?.charAt(0);
+      const sameGroup = existingGroup === newGroup;
+      const sameTime = existing.day === newClass.day && existing.time === newClass.time;
+      const differentId = existing.id !== newClass.id;
+      
+      return sameGroup && sameTime && differentId;
+    });
   }
 };
 
@@ -135,10 +225,71 @@ const NavigationTabs = ({ activeTab, setActiveTab }) => {
   );
 };
 
+// Week Navigation Component
+const WeekNavigation = ({ currentWeek, setCurrentWeek, weekDates }) => {
+  const weekStart = weekDates.Monday;
+  const weekEnd = weekDates.Saturday;
+  
+  return (
+    <div className="bg-white p-4 border border-gray-200 mb-6">
+      <div className="flex items-center justify-between">
+        <button 
+          onClick={() => setCurrentWeek(currentWeek - 1)}
+          className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-900 transition-colors duration-200"
+        >
+          <ChevronLeft size={16} />
+          <span>Previous Week</span>
+        </button>
+        
+        <div className="text-center">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Week {currentWeek + 1}
+          </h3>
+          <p className="text-sm text-gray-600">
+            {formatDate(weekStart)} - {formatDate(weekEnd)}, {weekStart.getFullYear()}
+          </p>
+        </div>
+        
+        <button 
+          onClick={() => setCurrentWeek(currentWeek + 1)}
+          className="flex items-center space-x-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-900 transition-colors duration-200"
+        >
+          <span>Next Week</span>
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Error Message Component
+const ErrorMessage = ({ message, onClose }) => {
+  if (!message) return null;
+  
+  return (
+    <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50 max-w-md">
+      <div className="flex items-start">
+        <AlertTriangle size={20} className="mr-2 mt-0.5" />
+        <div className="flex-1">
+          <strong className="font-bold">Scheduling Conflict!</strong>
+          <p className="text-sm mt-1">{message}</p>
+        </div>
+        <button 
+          onClick={onClose}
+          className="ml-2 text-red-700 hover:text-red-900"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+};
 // Schedule Builder Controls
 const ScheduleControls = ({ 
   showEmptySlots, 
-  setShowEmptySlots, 
+  setShowEmptySlots,
+  showEmptyRooms,
+  setShowEmptyRooms,
   onClearSchedule, 
   onExportSchedule,
   selectedGroup,
@@ -189,7 +340,19 @@ const ScheduleControls = ({
           }`}
         >
           {showEmptySlots ? <Eye size={16} /> : <EyeOff size={16} />}
-          <span>{showEmptySlots ? 'Hide Empty Slots' : 'Show Empty Slots'}</span>
+          <span>Empty Slots</span>
+        </button>
+        
+        <button 
+          onClick={() => setShowEmptyRooms(!showEmptyRooms)}
+          className={`flex items-center space-x-2 px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+            showEmptyRooms 
+              ? 'bg-purple-600 text-white hover:bg-purple-700' 
+              : 'bg-gray-600 text-white hover:bg-gray-700'
+          }`}
+        >
+          <Clock size={16} />
+          <span>Empty Rooms</span>
         </button>
       </div>
       
@@ -211,6 +374,36 @@ const ScheduleControls = ({
   </div>
 );
 
+// Empty Rooms Display Component
+const EmptyRoomsDisplay = ({ schedule, day, timeSlot }) => {
+  const occupiedRooms = [
+    ...schedule.amphitheater,
+    ...schedule.td,
+    ...schedule.tp
+  ]
+    .filter(item => item.day === day && item.time === timeSlot)
+    .map(item => item.room);
+
+  const allRooms = [
+    ...initialData.facilities.amphitheaters,
+    ...initialData.facilities.tdClasses,
+    ...initialData.facilities.tpClasses
+  ];
+
+  const emptyRooms = allRooms.filter(room => !occupiedRooms.includes(room));
+
+  if (emptyRooms.length === 0) return null;
+
+  return (
+    <div className="bg-green-50 border border-green-200 p-2 mb-2 text-xs">
+      <div className="font-medium text-green-800 mb-1">Available Rooms:</div>
+      <div className="text-green-700">
+        {emptyRooms.join(', ')}
+      </div>
+    </div>
+  );
+};
+
 // Add Class Modal
 const AddClassModal = ({ 
   isOpen, 
@@ -221,7 +414,8 @@ const AddClassModal = ({
   selectedGroup, 
   selectedSubject,
   setSelectedGroup,
-  setSelectedSubject 
+  setSelectedSubject,
+  schedule
 }) => {
   const [classType, setClassType] = useState('amphitheater');
   const [room, setRoom] = useState('');
@@ -247,24 +441,54 @@ const AddClassModal = ({
       ...(selectedGroup.length === 1 ? { group: selectedGroup } : { subGroup: selectedGroup })
     };
 
+    // Check for conflicts
+    const roomConflict = ConflictChecker.checkRoomConflict(schedule, newClass, classType);
+    const groupConflict = ConflictChecker.checkGroupConflict(schedule, newClass);
+
+    if (roomConflict) {
+      alert(`Room conflict: ${room} is already occupied by ${roomConflict.subject} at this time.`);
+      return;
+    }
+
+    if (groupConflict) {
+      alert(`Group conflict: This group already has a class at this time.`);
+      return;
+    }
+
     onSave(newClass, classType);
     onClose();
   };
 
   const getRoomOptions = () => {
+    const occupiedRooms = [
+      ...schedule.amphitheater,
+      ...schedule.td,
+      ...schedule.tp
+    ]
+      .filter(item => item.day === day && item.time === timeSlot)
+      .map(item => item.room);
+
+    let availableRooms = [];
     switch (classType) {
       case 'amphitheater':
-        return initialData.facilities.amphitheaters;
+        availableRooms = initialData.facilities.amphitheaters;
+        break;
       case 'td':
-        return initialData.facilities.tdClasses;
+        availableRooms = initialData.facilities.tdClasses;
+        break;
       case 'tp':
-        return initialData.facilities.tpClasses;
+        availableRooms = initialData.facilities.tpClasses;
+        break;
       default:
-        return [];
+        availableRooms = [];
     }
+
+    return availableRooms.filter(room => !occupiedRooms.includes(room));
   };
 
   if (!isOpen) return null;
+
+  const availableRooms = getRoomOptions();
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -319,17 +543,22 @@ const AddClassModal = ({
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Room:</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Available Rooms ({availableRooms.length} available):
+            </label>
             <select 
               value={room}
               onChange={(e) => setRoom(e.target.value)}
               className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-900"
             >
               <option value="">Select Room</option>
-              {getRoomOptions().map(roomOption => (
+              {availableRooms.map(roomOption => (
                 <option key={roomOption} value={roomOption}>{roomOption}</option>
               ))}
             </select>
+            {availableRooms.length === 0 && (
+              <p className="text-red-600 text-xs mt-1">No rooms available for this time slot</p>
+            )}
           </div>
         </div>
         
@@ -342,7 +571,8 @@ const AddClassModal = ({
           </button>
           <button 
             onClick={handleSave}
-            className="bg-blue-900 text-white px-4 py-2 text-sm font-medium hover:bg-blue-800 transition-colors duration-200"
+            disabled={availableRooms.length === 0}
+            className="bg-blue-900 text-white px-4 py-2 text-sm font-medium hover:bg-blue-800 transition-colors duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
             Add Class
           </button>
@@ -404,7 +634,15 @@ const EmptySlot = ({ day, timeSlot, onClick }) => (
 );
 
 // Calendar View Component
-const CalendarView = ({ schedule, showEmptySlots, onAddClass, onDeleteClass }) => {
+const CalendarView = ({ 
+  schedule, 
+  showEmptySlots, 
+  showEmptyRooms,
+  onAddClass, 
+  onDeleteClass, 
+  weekDates, 
+  holidays 
+}) => {
   const getClassesForTimeSlot = (day, timeSlot) => {
     const allClasses = [
       ...(schedule.amphitheater || []).map(item => ({ ...item, type: 'Amphitheater' })),
@@ -413,6 +651,15 @@ const CalendarView = ({ schedule, showEmptySlots, onAddClass, onDeleteClass }) =
     ];
 
     return allClasses.filter(item => item.day === day && item.time === timeSlot);
+  };
+
+  const isHoliday = (day) => {
+    const date = weekDates[day];
+    if (!date) return false;
+    
+    return holidays.some(holiday => 
+      holiday.toDateString() === date.toDateString()
+    );
   };
 
   return (
@@ -442,8 +689,20 @@ const CalendarView = ({ schedule, showEmptySlots, onAddClass, onDeleteClass }) =
                 Time
               </th>
               {initialData.days.map(day => (
-                <th key={day} className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b border-gray-200 min-w-48">
-                  {day}
+                <th key={day} className={`px-4 py-3 text-left text-sm font-medium border-b border-gray-200 min-w-48 ${
+                  isHoliday(day) ? 'bg-gray-300 text-gray-500' : 'text-gray-700'
+                }`}>
+                  <div>
+                    <div>{day}</div>
+                    <div className="text-xs font-normal">
+                      {weekDates[day] && formatDate(weekDates[day])}
+                    </div>
+                    {isHoliday(day) && (
+                      <div className="text-xs font-normal text-red-600">
+                        Holiday
+                      </div>
+                    )}
+                  </div>
                 </th>
               ))}
             </tr>
@@ -456,22 +715,42 @@ const CalendarView = ({ schedule, showEmptySlots, onAddClass, onDeleteClass }) =
                 </td>
                 {initialData.days.map(day => {
                   const classes = getClassesForTimeSlot(day, timeSlot);
+                  const dayIsHoliday = isHoliday(day);
+                  
                   return (
-                    <td key={`${day}-${timeSlot}`} className="px-4 py-4 align-top border-l border-gray-200">
+                    <td key={`${day}-${timeSlot}`} className={`px-4 py-4 align-top border-l border-gray-200 ${
+                      dayIsHoliday ? 'bg-gray-100' : ''
+                    }`}>
                       <div className="min-h-20">
-                        {classes.map(classItem => (
-                          <ClassBlock 
-                            key={classItem.id} 
-                            classItem={classItem} 
-                            onDelete={onDeleteClass}
-                          />
-                        ))}
-                        {(showEmptySlots || classes.length === 0) && (
-                          <EmptySlot 
-                            day={day} 
-                            timeSlot={timeSlot} 
-                            onClick={onAddClass}
-                          />
+                        {!dayIsHoliday && (
+                          <>
+                            {classes.map(classItem => (
+                              <ClassBlock 
+                                key={classItem.id} 
+                                classItem={classItem} 
+                                onDelete={onDeleteClass}
+                              />
+                            ))}
+                            {showEmptyRooms && (
+                              <EmptyRoomsDisplay 
+                                schedule={schedule} 
+                                day={day} 
+                                timeSlot={timeSlot} 
+                              />
+                            )}
+                            {(showEmptySlots || classes.length === 0) && (
+                              <EmptySlot 
+                                day={day} 
+                                timeSlot={timeSlot} 
+                                onClick={onAddClass}
+                              />
+                            )}
+                          </>
+                        )}
+                        {dayIsHoliday && (
+                          <div className="text-center text-gray-500 text-sm py-4">
+                            Holiday - No Classes
+                          </div>
                         )}
                       </div>
                     </td>
@@ -530,7 +809,7 @@ const FacilitiesOverview = () => (
           {initialData.facilities.amphitheaters.map(room => (
             <div key={room} className="flex items-center justify-between p-3 bg-gray-50">
               <span className="font-medium text-gray-700">{room}</span>
-              <span className="text-sm text-gray-500">400 capacity</span>
+              <span className="text-sm text-gray-500">{initialData.capacities.amphitheaters} capacity</span>
             </div>
           ))}
         </div>
@@ -542,7 +821,7 @@ const FacilitiesOverview = () => (
           {initialData.facilities.tdClasses.map(room => (
             <div key={room} className="flex items-center justify-between p-3 bg-gray-50">
               <span className="font-medium text-gray-700">{room}</span>
-              <span className="text-sm text-gray-500">50 capacity</span>
+              <span className="text-sm text-gray-500">{initialData.capacities.tdClasses} capacity</span>
             </div>
           ))}
         </div>
@@ -554,7 +833,7 @@ const FacilitiesOverview = () => (
           {initialData.facilities.tpClasses.map(room => (
             <div key={room} className="flex items-center justify-between p-3 bg-gray-50">
               <span className="font-medium text-gray-700">{room}</span>
-              <span className="text-sm text-gray-500">25 capacity</span>
+              <span className="text-sm text-gray-500">{initialData.capacities.tpClasses} capacity</span>
             </div>
           ))}
         </div>
@@ -595,19 +874,36 @@ const GroupsOverview = () => (
 );
 
 // Main App Component
-const App = () => {
+const SchoolManagementTool = () => {
   const [activeTab, setActiveTab] = useState('schedule');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [showEmptySlots, setShowEmptySlots] = useState(true);
+  const [showEmptyRooms, setShowEmptyRooms] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalData, setModalData] = useState({ day: '', timeSlot: '' });
+  const [errorMessage, setErrorMessage] = useState('');
+  const [currentWeek, setCurrentWeek] = useState(0);
+  const [holidays, setHolidays] = useState([]);
   
   const [schedule, setSchedule] = useState({
     amphitheater: [],
     td: [],
     tp: []
   });
+
+  // Calculate week dates
+  const weekDates = getWeekDates(currentWeek);
+
+  // Load holidays
+  useEffect(() => {
+    const loadHolidays = async () => {
+      const currentYear = new Date().getFullYear();
+      const moroccanHolidays = await fetchMoroccanHolidays(currentYear);
+      setHolidays(moroccanHolidays);
+    };
+    loadHolidays();
+  }, []);
 
   // Load schedule on component mount
   useEffect(() => {
@@ -626,10 +922,26 @@ const App = () => {
   };
 
   const handleSaveClass = (newClass, classType) => {
+    // Double-check for conflicts before saving
+    const roomConflict = ConflictChecker.checkRoomConflict(schedule, newClass, classType);
+    const groupConflict = ConflictChecker.checkGroupConflict(schedule, newClass);
+
+    if (roomConflict) {
+      setErrorMessage(`Room ${newClass.room} is already occupied by ${roomConflict.subject} (${roomConflict.group || roomConflict.subGroup}) at ${newClass.day} ${newClass.time}.`);
+      return;
+    }
+
+    if (groupConflict) {
+      const conflictGroup = groupConflict.group || groupConflict.subGroup;
+      setErrorMessage(`${newClass.group || newClass.subGroup} already has ${groupConflict.subject} at ${newClass.day} ${newClass.time}.`);
+      return;
+    }
+
     setSchedule(prev => ({
       ...prev,
       [classType]: [...prev[classType], newClass]
     }));
+    
     setSelectedGroup('');
     setSelectedSubject('');
   };
@@ -659,16 +971,22 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-gray-50" style={{ fontFamily: 'Roboto, sans-serif' }}>
+      {/* Error Message */}
+      <ErrorMessage 
+        message={errorMessage} 
+        onClose={() => setErrorMessage('')} 
+      />
+
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-3">
               <BookOpen size={32} className="text-blue-900" />
-              <h1 className="text-2xl font-bold text-gray-900">School Management System DEMO ( ENSAK )</h1>
+              <h1 className="text-2xl font-bold text-gray-900">School Management System</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">Academic Year 2024/2025</span>
+              <span className="text-sm text-gray-600">Academic Year 2024-2025</span>
               <button className="bg-blue-900 text-white px-4 py-2 text-sm font-medium hover:bg-blue-800 transition-colors duration-200">
                 Settings
               </button>
@@ -684,9 +1002,16 @@ const App = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'schedule' && (
           <div className="space-y-6">
+            <WeekNavigation 
+              currentWeek={currentWeek}
+              setCurrentWeek={setCurrentWeek}
+              weekDates={weekDates}
+            />
             <ScheduleControls 
               showEmptySlots={showEmptySlots}
               setShowEmptySlots={setShowEmptySlots}
+              showEmptyRooms={showEmptyRooms}
+              setShowEmptyRooms={setShowEmptyRooms}
               onClearSchedule={handleClearSchedule}
               onExportSchedule={handleExportSchedule}
               selectedGroup={selectedGroup}
@@ -697,8 +1022,11 @@ const App = () => {
             <CalendarView 
               schedule={schedule} 
               showEmptySlots={showEmptySlots}
+              showEmptyRooms={showEmptyRooms}
               onAddClass={handleAddClass}
               onDeleteClass={handleDeleteClass}
+              weekDates={weekDates}
+              holidays={holidays}
             />
           </div>
         )}
@@ -714,12 +1042,13 @@ const App = () => {
         day={modalData.day}
         timeSlot={modalData.timeSlot}
         selectedGroup={selectedGroup}
-        selectedSubject={selectedSubject}
-        setSelectedGroup={setSelectedGroup}
-        setSelectedSubject={setSelectedSubject}
-      />
-    </div>
-  );
+       selectedSubject={selectedSubject}
+       setSelectedGroup={setSelectedGroup}
+       setSelectedSubject={setSelectedSubject}
+       schedule={schedule}
+     />
+   </div>
+ );
 };
 
-export default App;
+export default SchoolManagementTool;
